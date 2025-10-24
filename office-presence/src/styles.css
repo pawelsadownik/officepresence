@@ -13,12 +13,14 @@ h1{margin:0 0 16px}
 .day.holiday{background:#2a1c22;border-color:#3b2830;color:var(--rose)}
 .day.past{opacity:.5;cursor:not-allowed}
 .day.selected{outline:2px solid var(--brand);background:#132225}
+.day.excused{outline:2px dashed #3b82f6;background:#1b2333;border-color:#2b3a55}
 .legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:14px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .dot{width:12px;height:12px;border-radius:3px;display:inline-block}
 .dot.pres{background:var(--brand)}
 .dot.we{background:#5b21b6}
 .dot.ho{background:#be123c}
+.dot.exc{background:#3b82f6}
 select{background:#1b2130;color:var(--text);border:1px solid #2b3346;padding:8px;border-radius:8px}
 .small{font-size:13px;color:var(--muted)}
 .stats{display:flex;gap:12px;flex-wrap:wrap}

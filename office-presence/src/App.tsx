@@ -4,18 +4,25 @@ import "dayjs/locale/pl";
 import Holidays from "date-holidays";
 import { auth, db, googleProvider } from "./firebase";
 import {
-  onAuthStateChanged, signInWithPopup, signInWithEmailAndPassword,
-  createUserWithEmailAndPassword, sendEmailVerification,
-  sendPasswordResetEmail, signOut
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  signOut,
 } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 dayjs.locale("pl");
 const hd = new Holidays("PL");
 
-type MonthDoc = { days: number[]; requiredPercent: number; updatedAt?: any };
+type DayStatus = "office" | "excused";
+type Mark = { d: number; status: DayStatus };
 
-const startMonth = dayjs().month();
+type MonthDoc = { marks?: Mark[]; days?: number[]; requiredPercent: number; updatedAt?: any };
+
+const startMonth = dayjs().month(); // 0..11
 const startYear = dayjs().year();
 
 export default function App() {
@@ -24,71 +31,95 @@ export default function App() {
   const [month, setMonth] = useState(startMonth);
   const [loading, setLoading] = useState(false);
 
-  const [daysSelected, setDaysSelected] = useState<number[]>([]);
+  const [marks, setMarks] = useState<Mark[]>([]);
   const [requiredPercent, setRequiredPercent] = useState<number>(40);
 
   const yyyyMM = useMemo(() => dayjs(new Date(year, month, 1)).format("YYYY-MM"), [year, month]);
 
-  useEffect(() => onAuthStateChanged(auth, u => setUser(u ? { uid: u.uid, email: u.email } : null)), []);
+  // sesja auth
+  useEffect(() => onAuthStateChanged(auth, (u) => setUser(u ? { uid: u.uid, email: u.email } : null)), []);
 
+  // wczytanie/utworzenie dokumentu miesiąca
   useEffect(() => {
     const run = async () => {
       if (!user) return;
       setLoading(true);
-      const ref = doc(db, "users", user.uid, "months", yyyyMM);
-      const snap = await getDoc(ref);
-      if (snap.exists()) {
-        const d = snap.data() as MonthDoc;
-        setDaysSelected(d.days || []);
-        setRequiredPercent(d.requiredPercent ?? 40);
-      } else {
-        await setDoc(ref, { days: [], requiredPercent: 40, updatedAt: serverTimestamp() });
-        setDaysSelected([]); setRequiredPercent(40);
+      try {
+        const ref = doc(db, "users", user.uid, "months", yyyyMM);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const d = snap.data() as MonthDoc;
+          if (Array.isArray(d.marks)) {
+            setMarks(d.marks);
+          } else if (Array.isArray(d.days)) {
+            // migracja starego formatu -> office
+            setMarks(d.days.map((n) => ({ d: n, status: "office" as const })));
+          } else {
+            setMarks([]);
+          }
+          setRequiredPercent(d.requiredPercent ?? 40);
+        } else {
+          await setDoc(ref, { marks: [], requiredPercent: 40, updatedAt: serverTimestamp() });
+          setMarks([]);
+          setRequiredPercent(40);
+        }
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
     run();
   }, [user, yyyyMM]);
 
+  // daty/kalendarz
   const today = dayjs();
   const firstDay = dayjs(new Date(year, month, 1));
   const daysInMonth = firstDay.daysInMonth();
 
   const holidaysSet = useMemo(() => {
-    const list = hd.getHolidays(year)?.filter(h => h.type === "public")
-      ?.map(h => dayjs(h.date).format("YYYY-MM-DD")) ?? [];
+    const list =
+      hd
+        .getHolidays(year)
+        ?.filter((h: any) => h.type === "public")
+        ?.map((h: any) => dayjs(h.date).format("YYYY-MM-DD")) ?? [];
     return new Set(list);
   }, [year]);
 
-  const isWeekend = (d: dayjs.Dayjs) => [0,6].includes(d.day());
+  const isWeekend = (d: dayjs.Dayjs) => [0, 6].includes(d.day());
   const isHoliday = (d: dayjs.Dayjs) => holidaysSet.has(d.format("YYYY-MM-DD"));
 
-  const workdays = useMemo(() => {
-    const arr: number[] = [];
-    for (let i = 1; i <= daysInMonth; i++) {
-      const dt = dayjs(new Date(year, month, i));
-      if (!isWeekend(dt) && !isHoliday(dt)) arr.push(i);
-    }
-    return arr;
-  }, [year, month, daysInMonth, holidaysSet]);
+  const getStatus = (arr: Mark[], day: number) => arr.find((m) => m.d === day)?.status as DayStatus | undefined;
+  const setStatus = (arr: Mark[], day: number, status?: DayStatus): Mark[] => {
+    const filtered = arr.filter((m) => m.d !== day);
+    return status ? [...filtered, { d: day, status }].sort((a, b) => a.d - b.d) : filtered;
+  };
+  // cykl 3-stanowy: none -> office -> excused -> none
+  const nextStatus3 = (current?: DayStatus): DayStatus | undefined => {
+    if (!current) return "office";
+    if (current === "office") return "excused";
+    return undefined; // z excused wracamy do none
+  };
 
-  const presentDays = daysSelected.filter(d => workdays.includes(d)).length;
-  const percent = workdays.length ? (presentDays / workdays.length) * 100 : 0;
-  const neededDays = Math.ceil((requiredPercent / 100) * workdays.length);
-  const missing = Math.max(0, neededDays - presentDays);
-
-  const toggleDay = async (day: number, dt: dayjs.Dayjs) => {
+  // klik w dzień
+  const handleDayClick = async (day: number, dt: dayjs.Dayjs) => {
     if (!user) return;
-    const isPast = dt.isBefore(today.startOf("day")) && dt.month()===today.month() && dt.year()===today.year();
-    if (isPast || isWeekend(dt) || isHoliday(dt)) return;
+    if (isWeekend(dt) || isHoliday(dt)) return; // weekend/święto nieklikalne
 
-    const next = daysSelected.includes(day)
-      ? daysSelected.filter(x => x !== day)
-      : [...daysSelected, day].sort((a,b)=>a-b);
-    setDaysSelected(next);
+    // blokada przeszłych dni w bieżącym miesiącu (zachowujemy zaznaczenia)
+    const past =
+      dt.isBefore(today.startOf("day")) && dt.month() === today.month() && dt.year() === today.year();
+    if (past) return;
+
+    const current = getStatus(marks, day);
+    const next = nextStatus3(current);
+    const nextMarks = setStatus(marks, day, next);
+    setMarks(nextMarks);
 
     const ref = doc(db, "users", user.uid, "months", yyyyMM);
-    await setDoc(ref, { days: next, requiredPercent, updatedAt: serverTimestamp() }, { merge: true });
+    await setDoc(
+      ref,
+      { marks: nextMarks, requiredPercent, updatedAt: serverTimestamp() },
+      { merge: true }
+    );
   };
 
   const savePercent = async (val: number) => {
@@ -98,124 +129,276 @@ export default function App() {
     await setDoc(ref, { requiredPercent: val, updatedAt: serverTimestamp() }, { merge: true });
   };
 
-  if (!user) return <AuthScreen
-    onGoogle={()=>signInWithPopup(auth, googleProvider)}
-    onEmailLogin={(e,p)=>signInWithEmailAndPassword(auth,e,p)}
-    onEmailSignup={async (e,p)=>{ const r=await createUserWithEmailAndPassword(auth,e,p); try{await sendEmailVerification(r.user)}catch{} }}
-    onForgot={(e)=>sendPasswordResetEmail(auth,e)}
-  />;
+  // zbiory do statystyk
+  const excusedSet = useMemo(
+    () => new Set(marks.filter((m) => m.status === "excused").map((m) => m.d)),
+    [marks]
+  );
+
+  const workdays = useMemo(() => {
+    const arr: number[] = [];
+    for (let i = 1; i <= daysInMonth; i++) {
+      const dt = dayjs(new Date(year, month, i));
+      if (!isWeekend(dt) && !isHoliday(dt) && !excusedSet.has(i)) arr.push(i);
+    }
+    return arr;
+  }, [year, month, daysInMonth, holidaysSet, excusedSet]);
+
+  const presentDays = marks.filter((m) => m.status === "office" && workdays.includes(m.d)).length;
+  const percent = workdays.length ? (presentDays / workdays.length) * 100 : 0;
+  const neededDays = Math.ceil((requiredPercent / 100) * workdays.length);
+  const missing = Math.max(0, neededDays - presentDays);
+
+  if (!user)
+    return (
+      <AuthScreen
+        onGoogle={async () => {
+          await signInWithPopup(auth, googleProvider);
+        }}
+        onEmailLogin={async (e, p) => {
+          await signInWithEmailAndPassword(auth, e, p);
+        }}
+        onEmailSignup={async (e, p) => {
+          const r = await createUserWithEmailAndPassword(auth, e, p);
+          try {
+            await sendEmailVerification(r.user);
+          } catch {}
+        }}
+        onForgot={async (e) => {
+          await sendPasswordResetEmail(auth, e);
+        }}
+      />
+    );
 
   return (
     <div className="container">
-      <div className="row" style={{justifyContent:'space-between', marginBottom:12}}>
+      <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
         <h1>Obecność w biurze</h1>
         <div className="small">
           {user.email} &nbsp;•&nbsp;
-          <button className="btn" onClick={()=>signOut(auth)}>Wyloguj</button>
+          <button className="btn" onClick={() => signOut(auth)}>
+            Wyloguj
+          </button>
         </div>
       </div>
 
-      <div className="card" style={{marginBottom:12}}>
-        <div className="row" style={{gap:12}}>
-          <select value={month} onChange={e=>setMonth(parseInt(e.target.value))}>
-            {Array.from({length:12}).map((_,i)=>(<option key={i} value={i}>{dayjs().month(i).format("MMMM")}</option>))}
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div className="row" style={{ gap: 12 }}>
+          <select value={month} onChange={(e) => setMonth(parseInt(e.target.value))}>
+            {Array.from({ length: 12 }).map((_, i) => (
+              <option key={i} value={i}>
+                {dayjs().month(i).format("MMMM")}
+              </option>
+            ))}
           </select>
-          <select value={year} onChange={e=>setYear(parseInt(e.target.value))}>
-            {Array.from({length:5}).map((_,i)=>{const y=startYear-2+i; return <option key={y} value={y}>{y}</option>;})}
+          <select value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
+            {Array.from({ length: 5 }).map((_, i) => {
+              const y = startYear - 2 + i;
+              return (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              );
+            })}
           </select>
 
-          <div className="row" style={{marginLeft:'auto',gap:8}}>
+          <div className="row" style={{ marginLeft: "auto", gap: 8 }}>
             <label>Minimalna obecność %</label>
-            <input className="input" type="number" min={0} max={100}
+            <input
+              className="input"
+              type="number"
+              min={0}
+              max={100}
               value={requiredPercent}
-              onChange={e=>savePercent(Math.max(0, Math.min(100, parseInt(e.target.value||"0"))))}/>
+              onChange={(e) =>
+                savePercent(Math.max(0, Math.min(100, parseInt(e.target.value || "0"))))
+              }
+            />
           </div>
         </div>
       </div>
 
-      <div className="legend" style={{margin:"8px 0 12px"}}>
-        <span><i className="dot pres"></i>Obecność</span>
-        <span><i className="dot we"></i>Weekend</span>
-        <span><i className="dot ho"></i>Święto</span>
+      <div className="legend" style={{ margin: "8px 0 12px" }}>
+        <span>
+          <i className="dot pres"></i>Obecność
+        </span>
+        <span>
+          <i className="dot we"></i>Weekend
+        </span>
+        <span>
+          <i className="dot ho"></i>Święto
+        </span>
+        <span>
+          <i className="dot exc"></i>Urlop/Choroba
+        </span>
       </div>
 
       <div className="card">
-        {loading ? <div className="center">Ładowanie…</div> :
-        <>
-          <div className="grid" style={{marginBottom:8}}>
-            {["Pon","Wt","Śr","Czw","Pt","Sob","Nd"].map(l=><div key={l} className="small center" style={{opacity:.7}}>{l}</div>)}
-          </div>
-          <div className="grid">
-            {Array.from({length:(dayjs(new Date(year, month, 1)).day()+6)%7}).map((_,i)=><div key={"x"+i}></div>)}
-            {Array.from({length:daysInMonth}).map((_,i)=>{
-              const day=i+1; const dt=dayjs(new Date(year,month,day));
-              const weekend=[0,6].includes(dt.day());
-              const holiday=isHoliday(dt);
-              const past=dt.isBefore(today.startOf("day")) && dt.month()===today.month() && dt.year()===today.year();
-              const selected=daysSelected.includes(day);
-              const cls=["day", weekend&&"weekend", holiday&&"holiday", past&&"past", selected&&"selected"].filter(Boolean).join(" ");
-              return <div key={day} className={cls} onClick={()=>toggleDay(day,dt)}>{day}</div>;
-            })}
-          </div>
-        </>}
+        {loading ? (
+          <div className="center">Ładowanie…</div>
+        ) : (
+          <>
+            <div className="grid" style={{ marginBottom: 8 }}>
+              {["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Nd"].map((l) => (
+                <div key={l} className="small center" style={{ opacity: 0.7 }}>
+                  {l}
+                </div>
+              ))}
+            </div>
+            <div className="grid">
+              {/* puste do przesunięcia (poniedziałek jako 1. kolumna) */}
+              {Array.from({ length: (dayjs(new Date(year, month, 1)).day() + 6) % 7 }).map(
+                (_, i) => (
+                  <div key={"x" + i}></div>
+                )
+              )}
+              {Array.from({ length: daysInMonth }).map((_, i) => {
+                const day = i + 1;
+                const dt = dayjs(new Date(year, month, day));
+                const weekend = isWeekend(dt);
+                const holiday = isHoliday(dt);
+                const past =
+                  dt.isBefore(today.startOf("day")) &&
+                  dt.month() === today.month() &&
+                  dt.year() === today.year();
+
+                const status = getStatus(marks, day); // 'office' | 'excused' | undefined
+                const isOffice = status === "office";
+                const isExcused = status === "excused";
+
+                const cls = [
+                  "day",
+                  weekend && "weekend",
+                  holiday && "holiday",
+                  past && "past",
+                  isOffice && "selected",
+                  isExcused && "excused",
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+
+                return (
+                  <div key={day} className={cls} onClick={() => handleDayClick(day, dt)}>
+                    {day}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
 
-      <div className="row stats" style={{marginTop:12}}>
-        <div className="stat">Dni robocze: <b>{workdays.length}</b></div>
-        <div className="stat">Obecne dni: <b>{presentDays}</b></div>
-        <div className="stat">Procent obecności: <b>{percent.toFixed(1)}%</b></div>
-        <div className="stat">Min. liczba dni dla {requiredPercent}%: <b>{neededDays}</b></div>
-        {missing>0 && <div className="stat">Brakuje: <b>{missing}</b></div>}
+      <div className="row stats" style={{ marginTop: 12 }}>
+        <div className="stat">
+          Dni robocze: <b>{workdays.length}</b>
+        </div>
+        <div className="stat">
+          Obecne dni: <b>{presentDays}</b>
+        </div>
+        <div className="stat">
+          Procent obecności: <b>{percent.toFixed(1)}%</b>
+        </div>
+        <div className="stat">
+          Min. liczba dni dla {requiredPercent}%: <b>{neededDays}</b>
+        </div>
+        {missing > 0 && (
+          <div className="stat">
+            Brakuje: <b>{missing}</b>
+          </div>
+        )}
       </div>
 
-      <div className="card" style={{marginTop:12}}>
-        <div className="progress"><div className="bar" style={{width:`${Math.min(100, percent)}%`}}/></div>
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="progress">
+          <div className="bar" style={{ width: `${Math.min(100, percent)}%` }} />
+        </div>
       </div>
     </div>
   );
 }
 
+// --- ekran logowania/rejestracji (bez zmian funkcjonalnych)
 function AuthScreen({
-  onGoogle, onEmailLogin, onEmailSignup, onForgot
-}:{
+  onGoogle,
+  onEmailLogin,
+  onEmailSignup,
+  onForgot,
+}: {
   onGoogle: () => Promise<unknown>;
   onEmailLogin: (e: string, p: string) => Promise<unknown>;
   onEmailSignup: (e: string, p: string) => Promise<unknown>;
   onForgot: (e: string) => Promise<unknown>;
 }) {
-  const [email,setEmail]=useState(""); const [pwd,setPwd]=useState("");
-  const [mode,setMode]=useState<"login"|"signup">("login");
-  const [msg,setMsg]=useState("");
+  const [email, setEmail] = useState("");
+  const [pwd, setPwd] = useState("");
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [msg, setMsg] = useState("");
 
   const submit = async () => {
     setMsg("");
     try {
-      if (mode==="login") await onEmailLogin(email,pwd);
-      else { await onEmailSignup(email,pwd); setMsg("Konto utworzone. Sprawdź e-mail (wysłano weryfikację)."); }
-    } catch (e:any) { setMsg(e.message || "Błąd"); }
+      if (mode === "login") await onEmailLogin(email, pwd);
+      else {
+        await onEmailSignup(email, pwd);
+        setMsg("Konto utworzone. Sprawdź e-mail (wysłano weryfikację).");
+      }
+    } catch (e: any) {
+      setMsg(e.message || "Błąd");
+    }
   };
   const reset = async () => {
-    if (!email) { setMsg("Podaj e-mail"); return; }
-    try { await onForgot(email); setMsg("Wysłano link resetu hasła."); } catch (e:any) { setMsg(e.message || "Błąd"); }
+    if (!email) {
+      setMsg("Podaj e-mail");
+      return;
+    }
+    try {
+      await onForgot(email);
+      setMsg("Wysłano link resetu hasła.");
+    } catch (e: any) {
+      setMsg(e.message || "Błąd");
+    }
   };
 
   return (
-    <div className="container" style={{maxWidth:460}}>
+    <div className="container" style={{ maxWidth: 460 }}>
       <div className="card">
         <h1 className="center">Sign up / Log in</h1>
-        <div className="row" style={{justifyContent:"center", margin:"12px 0"}}>
-          <button className="btn btn-brand" onClick={onGoogle}>Zaloguj przez Google</button>
+        <div className="row" style={{ justifyContent: "center", margin: "12px 0" }}>
+          <button className="btn btn-brand" onClick={onGoogle}>
+            Zaloguj przez Google
+          </button>
         </div>
-        <div style={{height:1, background:"#2b3346", margin:"10px 0 14px"}}/>
-        <div className="row" style={{flexDirection:"column", gap:8}}>
-          <input className="input" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} />
-          <input className="input" placeholder="Hasło" type="password" value={pwd} onChange={e=>setPwd(e.target.value)} />
-          <button className="btn" onClick={submit}>{mode==="login" ? "Zaloguj" : "Utwórz konto"}</button>
+        <div style={{ height: 1, background: "#2b3346", margin: "10px 0 14px" }} />
+        <div className="row" style={{ flexDirection: "column", gap: 8 }}>
+          <input
+            className="input"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <input
+            className="input"
+            placeholder="Hasło"
+            type="password"
+            value={pwd}
+            onChange={(e) => setPwd(e.target.value)}
+          />
+          <button className="btn" onClick={submit}>
+            {mode === "login" ? "Zaloguj" : "Utwórz konto"}
+          </button>
           <div className="small">
-            {mode==="login" ? <>Nie masz konta? <a href="#" onClick={()=>setMode("signup")}>Zarejestruj się</a> • <a href="#" onClick={reset}>Nie pamiętasz hasła?</a></>
-            : <>Masz konto? <a href="#" onClick={()=>setMode("login")}>Zaloguj się</a></>}
+            {mode === "login" ? (
+              <>
+                Nie masz konta? <a href="#" onClick={() => setMode("signup")}>Zarejestruj się</a> •{" "}
+                <a href="#" onClick={reset}>Nie pamiętasz hasła?</a>
+              </>
+            ) : (
+              <>
+                Masz konto? <a href="#" onClick={() => setMode("login")}>Zaloguj się</a>
+              </>
+            )}
           </div>
-          {msg && <div className="small" style={{color:"#9ae6b4"}}>{msg}</div>}
+          {msg && <div className="small" style={{ color: "#9ae6b4" }}>{msg}</div>}
         </div>
       </div>
     </div>

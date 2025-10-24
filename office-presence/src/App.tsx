@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import dayjs from "dayjs";
 import "dayjs/locale/pl";
 import Holidays from "date-holidays";
@@ -177,8 +177,12 @@ export default function App() {
 
 function AuthScreen({
   onGoogle, onEmailLogin, onEmailSignup, onForgot
-}:{ onGoogle:()=>Promise<void>; onEmailLogin:(e:string,p:string)=>Promise<void>;
-   onEmailSignup:(e:string,p:string)=>Promise<void>; onForgot:(e:string)=>Promise<void>; }) {
+}:{
+  onGoogle: () => Promise<unknown>;
+  onEmailLogin: (e: string, p: string) => Promise<unknown>;
+  onEmailSignup: (e: string, p: string) => Promise<unknown>;
+  onForgot: (e: string) => Promise<unknown>;
+}) {
   const [email,setEmail]=useState(""); const [pwd,setPwd]=useState("");
   const [mode,setMode]=useState<"login"|"signup">("login");
   const [msg,setMsg]=useState("");

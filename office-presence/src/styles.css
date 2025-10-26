@@ -28,3 +28,16 @@ select{background:#1b2130;color:var(--text);border:1px solid #2b3346;padding:8px
 .progress{height:10px;background:#1b2130;border-radius:8px;overflow:hidden}
 .bar{height:100%;background:var(--brand);width:0}
 .center{text-align:center}
+
+/* footer */
+.footer-logout{
+  margin-top:32px;
+  padding:14px 0;
+  border-top:1px solid #2b3346;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:12px;
+  font-size:14px;
+  color:var(--muted);
+}

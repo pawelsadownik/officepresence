@@ -22,7 +22,7 @@ type Mark = { d: number; status: DayStatus };
 
 type MonthDoc = { marks?: Mark[]; days?: number[]; requiredPercent: number; updatedAt?: any };
 
-const startMonth = dayjs().month(); // 0..11
+const startMonth = dayjs().month();
 const startYear = dayjs().year();
 
 export default function App() {
@@ -36,10 +36,8 @@ export default function App() {
 
   const yyyyMM = useMemo(() => dayjs(new Date(year, month, 1)).format("YYYY-MM"), [year, month]);
 
-  // sesja auth
   useEffect(() => onAuthStateChanged(auth, (u) => setUser(u ? { uid: u.uid, email: u.email } : null)), []);
 
-  // wczytanie/utworzenie dokumentu miesiąca
   useEffect(() => {
     const run = async () => {
       if (!user) return;
@@ -49,14 +47,9 @@ export default function App() {
         const snap = await getDoc(ref);
         if (snap.exists()) {
           const d = snap.data() as MonthDoc;
-          if (Array.isArray(d.marks)) {
-            setMarks(d.marks);
-          } else if (Array.isArray(d.days)) {
-            // migracja starego formatu -> office
-            setMarks(d.days.map((n) => ({ d: n, status: "office" as const })));
-          } else {
-            setMarks([]);
-          }
+          if (Array.isArray(d.marks)) setMarks(d.marks);
+          else if (Array.isArray(d.days)) setMarks(d.days.map((n) => ({ d: n, status: "office" as const })));
+          else setMarks([]);
           setRequiredPercent(d.requiredPercent ?? 40);
         } else {
           await setDoc(ref, { marks: [], requiredPercent: 40, updatedAt: serverTimestamp() });
@@ -70,17 +63,14 @@ export default function App() {
     run();
   }, [user, yyyyMM]);
 
-  // daty/kalendarz
   const today = dayjs();
   const firstDay = dayjs(new Date(year, month, 1));
   const daysInMonth = firstDay.daysInMonth();
 
   const holidaysSet = useMemo(() => {
     const list =
-      hd
-        .getHolidays(year)
-        ?.filter((h: any) => h.type === "public")
-        ?.map((h: any) => dayjs(h.date).format("YYYY-MM-DD")) ?? [];
+      hd.getHolidays(year)?.filter((h: any) => h.type === "public")?.map((h: any) => dayjs(h.date).format("YYYY-MM-DD")) ??
+      [];
     return new Set(list);
   }, [year]);
 
@@ -92,21 +82,17 @@ export default function App() {
     const filtered = arr.filter((m) => m.d !== day);
     return status ? [...filtered, { d: day, status }].sort((a, b) => a.d - b.d) : filtered;
   };
-  // cykl 3-stanowy: none -> office -> excused -> none
   const nextStatus3 = (current?: DayStatus): DayStatus | undefined => {
     if (!current) return "office";
     if (current === "office") return "excused";
-    return undefined; // z excused wracamy do none
+    return undefined;
   };
 
-  // klik w dzień
   const handleDayClick = async (day: number, dt: dayjs.Dayjs) => {
     if (!user) return;
-    if (isWeekend(dt) || isHoliday(dt)) return; // weekend/święto nieklikalne
+    if (isWeekend(dt) || isHoliday(dt)) return;
 
-    // blokada przeszłych dni w bieżącym miesiącu (zachowujemy zaznaczenia)
-    const past =
-      dt.isBefore(today.startOf("day")) && dt.month() === today.month() && dt.year() === today.year();
+    const past = dt.isBefore(today.startOf("day")) && dt.month() === today.month() && dt.year() === today.year();
     if (past) return;
 
     const current = getStatus(marks, day);
@@ -115,11 +101,7 @@ export default function App() {
     setMarks(nextMarks);
 
     const ref = doc(db, "users", user.uid, "months", yyyyMM);
-    await setDoc(
-      ref,
-      { marks: nextMarks, requiredPercent, updatedAt: serverTimestamp() },
-      { merge: true }
-    );
+    await setDoc(ref, { marks: nextMarks, requiredPercent, updatedAt: serverTimestamp() }, { merge: true });
   };
 
   const savePercent = async (val: number) => {
@@ -129,11 +111,7 @@ export default function App() {
     await setDoc(ref, { requiredPercent: val, updatedAt: serverTimestamp() }, { merge: true });
   };
 
-  // zbiory do statystyk
-  const excusedSet = useMemo(
-    () => new Set(marks.filter((m) => m.status === "excused").map((m) => m.d)),
-    [marks]
-  );
+  const excusedSet = useMemo(() => new Set(marks.filter((m) => m.status === "excused").map((m) => m.d)), [marks]);
 
   const workdays = useMemo(() => {
     const arr: number[] = [];
@@ -172,14 +150,9 @@ export default function App() {
 
   return (
     <div className="container">
+      {/* nagłówek bez panelu logowania */}
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
         <h1>Obecność w biurze</h1>
-        <div className="small">
-          {user.email} &nbsp;•&nbsp;
-          <button className="btn" onClick={() => signOut(auth)}>
-            Wyloguj
-          </button>
-        </div>
       </div>
 
       <div className="card" style={{ marginBottom: 12 }}>
@@ -210,9 +183,7 @@ export default function App() {
               min={0}
               max={100}
               value={requiredPercent}
-              onChange={(e) =>
-                savePercent(Math.max(0, Math.min(100, parseInt(e.target.value || "0"))))
-              }
+              onChange={(e) => savePercent(Math.max(0, Math.min(100, parseInt(e.target.value || "0"))))}
             />
           </div>
         </div>
@@ -246,12 +217,9 @@ export default function App() {
               ))}
             </div>
             <div className="grid">
-              {/* puste do przesunięcia (poniedziałek jako 1. kolumna) */}
-              {Array.from({ length: (dayjs(new Date(year, month, 1)).day() + 6) % 7 }).map(
-                (_, i) => (
-                  <div key={"x" + i}></div>
-                )
-              )}
+              {Array.from({ length: (dayjs(new Date(year, month, 1)).day() + 6) % 7 }).map((_, i) => (
+                <div key={"x" + i}></div>
+              ))}
               {Array.from({ length: daysInMonth }).map((_, i) => {
                 const day = i + 1;
                 const dt = dayjs(new Date(year, month, day));
@@ -262,18 +230,11 @@ export default function App() {
                   dt.month() === today.month() &&
                   dt.year() === today.year();
 
-                const status = getStatus(marks, day); // 'office' | 'excused' | undefined
+                const status = getStatus(marks, day);
                 const isOffice = status === "office";
                 const isExcused = status === "excused";
 
-                const cls = [
-                  "day",
-                  weekend && "weekend",
-                  holiday && "holiday",
-                  past && "past",
-                  isOffice && "selected",
-                  isExcused && "excused",
-                ]
+                const cls = ["day", weekend && "weekend", holiday && "holiday", past && "past", isOffice && "selected", isExcused && "excused"]
                   .filter(Boolean)
                   .join(" ");
 
@@ -313,11 +274,16 @@ export default function App() {
           <div className="bar" style={{ width: `${Math.min(100, percent)}%` }} />
         </div>
       </div>
+
+      {/* --- STOPKA Z LOGOWANIEM NA DOLE --- */}
+      <footer className="footer-logout">
+        <span>{user.email}</span>
+        <button className="btn" onClick={() => signOut(auth)}>Wyloguj</button>
+      </footer>
     </div>
   );
 }
 
-// --- ekran logowania/rejestracji (bez zmian funkcjonalnych)
 function AuthScreen({
   onGoogle,
   onEmailLogin,
@@ -370,32 +336,14 @@ function AuthScreen({
         </div>
         <div style={{ height: 1, background: "#2b3346", margin: "10px 0 14px" }} />
         <div className="row" style={{ flexDirection: "column", gap: 8 }}>
-          <input
-            className="input"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <input
-            className="input"
-            placeholder="Hasło"
-            type="password"
-            value={pwd}
-            onChange={(e) => setPwd(e.target.value)}
-          />
-          <button className="btn" onClick={submit}>
-            {mode === "login" ? "Zaloguj" : "Utwórz konto"}
-          </button>
+          <input className="input" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input className="input" placeholder="Hasło" type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} />
+          <button className="btn" onClick={submit}>{mode === "login" ? "Zaloguj" : "Utwórz konto"}</button>
           <div className="small">
             {mode === "login" ? (
-              <>
-                Nie masz konta? <a href="#" onClick={() => setMode("signup")}>Zarejestruj się</a> •{" "}
-                <a href="#" onClick={reset}>Nie pamiętasz hasła?</a>
-              </>
+              <>Nie masz konta? <a href="#" onClick={() => setMode("signup")}>Zarejestruj się</a> • <a href="#" onClick={reset}>Nie pamiętasz hasła?</a></>
             ) : (
-              <>
-                Masz konto? <a href="#" onClick={() => setMode("login")}>Zaloguj się</a>
-              </>
+              <>Masz konto? <a href="#" onClick={() => setMode("login")}>Zaloguj się</a></>
             )}
           </div>
           {msg && <div className="small" style={{ color: "#9ae6b4" }}>{msg}</div>}

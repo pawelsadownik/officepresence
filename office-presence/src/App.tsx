@@ -20,7 +20,13 @@ const hd = new Holidays("PL");
 type DayStatus = "office" | "excused";
 type Mark = { d: number; status: DayStatus };
 
-type MonthDoc = { marks?: Mark[]; days?: number[]; requiredPercent: number; updatedAt?: any };
+type MonthDoc = {
+  marks?: Mark[];
+  days?: number[];                 // stary format (migracja -> office)
+  requiredPercent: number;
+  employmentPercent?: number;      // NOWE: wymiar pracy w %
+  updatedAt?: any;
+};
 
 const startMonth = dayjs().month();
 const startYear = dayjs().year();
@@ -33,11 +39,14 @@ export default function App() {
 
   const [marks, setMarks] = useState<Mark[]>([]);
   const [requiredPercent, setRequiredPercent] = useState<number>(40);
+  const [employmentPercent, setEmploymentPercent] = useState<number>(100); // NOWE
 
   const yyyyMM = useMemo(() => dayjs(new Date(year, month, 1)).format("YYYY-MM"), [year, month]);
 
+  // auth
   useEffect(() => onAuthStateChanged(auth, (u) => setUser(u ? { uid: u.uid, email: u.email } : null)), []);
 
+  // load month doc
   useEffect(() => {
     const run = async () => {
       if (!user) return;
@@ -51,10 +60,17 @@ export default function App() {
           else if (Array.isArray(d.days)) setMarks(d.days.map((n) => ({ d: n, status: "office" as const })));
           else setMarks([]);
           setRequiredPercent(d.requiredPercent ?? 40);
+          setEmploymentPercent(d.employmentPercent ?? 100); // NOWE
         } else {
-          await setDoc(ref, { marks: [], requiredPercent: 40, updatedAt: serverTimestamp() });
+          await setDoc(ref, {
+            marks: [],
+            requiredPercent: 40,
+            employmentPercent: 100,     // NOWE
+            updatedAt: serverTimestamp(),
+          });
           setMarks([]);
           setRequiredPercent(40);
+          setEmploymentPercent(100);
         }
       } finally {
         setLoading(false);
@@ -63,6 +79,7 @@ export default function App() {
     run();
   }, [user, yyyyMM]);
 
+  // calendar helpers
   const today = dayjs();
   const firstDay = dayjs(new Date(year, month, 1));
   const daysInMonth = firstDay.daysInMonth();
@@ -82,6 +99,7 @@ export default function App() {
     const filtered = arr.filter((m) => m.d !== day);
     return status ? [...filtered, { d: day, status }].sort((a, b) => a.d - b.d) : filtered;
   };
+  // 3-stanowy cykl: none -> office -> excused -> none
   const nextStatus3 = (current?: DayStatus): DayStatus | undefined => {
     if (!current) return "office";
     if (current === "office") return "excused";
@@ -101,16 +119,31 @@ export default function App() {
     setMarks(nextMarks);
 
     const ref = doc(db, "users", user.uid, "months", yyyyMM);
-    await setDoc(ref, { marks: nextMarks, requiredPercent, updatedAt: serverTimestamp() }, { merge: true });
+    await setDoc(
+      ref,
+      { marks: nextMarks, requiredPercent, employmentPercent, updatedAt: serverTimestamp() },
+      { merge: true }
+    );
   };
 
   const savePercent = async (val: number) => {
-    setRequiredPercent(val);
+    const v = Math.max(0, Math.min(100, val));
+    setRequiredPercent(v);
     if (!user) return;
     const ref = doc(db, "users", user.uid, "months", yyyyMM);
-    await setDoc(ref, { requiredPercent: val, updatedAt: serverTimestamp() }, { merge: true });
+    await setDoc(ref, { requiredPercent: v, updatedAt: serverTimestamp() }, { merge: true });
   };
 
+  // NOWE: zapis wymiaru pracy
+  const saveEmployment = async (val: number) => {
+    const v = Math.max(0, Math.min(100, val));
+    setEmploymentPercent(v);
+    if (!user) return;
+    const ref = doc(db, "users", user.uid, "months", yyyyMM);
+    await setDoc(ref, { employmentPercent: v, updatedAt: serverTimestamp() }, { merge: true });
+  };
+
+  // stats
   const excusedSet = useMemo(() => new Set(marks.filter((m) => m.status === "excused").map((m) => m.d)), [marks]);
 
   const workdays = useMemo(() => {
@@ -123,8 +156,11 @@ export default function App() {
   }, [year, month, daysInMonth, holidaysSet, excusedSet]);
 
   const presentDays = marks.filter((m) => m.status === "office" && workdays.includes(m.d)).length;
+
+  // najpierw próg dla pełnego etatu, potem skala wymiaru
+  const baseNeeded = Math.round((requiredPercent / 100) * workdays.length);
+  const neededDays = Math.round(baseNeeded * (employmentPercent / 100));   // <= tu uwzględniamy wymiar pracy
   const percent = workdays.length ? (presentDays / workdays.length) * 100 : 0;
-  const neededDays = Math.ceil((requiredPercent / 100) * workdays.length);
   const missing = Math.max(0, neededDays - presentDays);
 
   if (!user)
@@ -150,7 +186,6 @@ export default function App() {
 
   return (
     <div className="container">
-      {/* nagłówek bez panelu logowania */}
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
         <h1>Obecność w biurze</h1>
       </div>
@@ -175,6 +210,7 @@ export default function App() {
             })}
           </select>
 
+          {/* Ustawienia po prawej */}
           <div className="row" style={{ marginLeft: "auto", gap: 8 }}>
             <label>Minimalna obecność %</label>
             <input
@@ -183,25 +219,30 @@ export default function App() {
               min={0}
               max={100}
               value={requiredPercent}
-              onChange={(e) => savePercent(Math.max(0, Math.min(100, parseInt(e.target.value || "0"))))}
+              onChange={(e) => savePercent(parseInt(e.target.value || "0"))}
+              style={{ width: 90 }}
+            />
+
+            {/* NOWE pole: Wymiar pracy % */}
+            <label>Wymiar pracy %</label>
+            <input
+              className="input"
+              type="number"
+              min={0}
+              max={100}
+              value={employmentPercent}
+              onChange={(e) => saveEmployment(parseInt(e.target.value || "0"))}
+              style={{ width: 90 }}
             />
           </div>
         </div>
       </div>
 
       <div className="legend" style={{ margin: "8px 0 12px" }}>
-        <span>
-          <i className="dot pres"></i>Obecność
-        </span>
-        <span>
-          <i className="dot we"></i>Weekend
-        </span>
-        <span>
-          <i className="dot ho"></i>Święto
-        </span>
-        <span>
-          <i className="dot exc"></i>Urlop/Choroba
-        </span>
+        <span><i className="dot pres"></i>Obecność</span>
+        <span><i className="dot we"></i>Weekend</span>
+        <span><i className="dot ho"></i>Święto</span>
+        <span><i className="dot exc"></i>Urlop/Choroba</span>
       </div>
 
       <div className="card">
@@ -226,9 +267,9 @@ export default function App() {
                 const weekend = isWeekend(dt);
                 const holiday = isHoliday(dt);
                 const past =
-                  dt.isBefore(today.startOf("day")) &&
-                  dt.month() === today.month() &&
-                  dt.year() === today.year();
+                  dt.isBefore(dayjs().startOf("day")) &&
+                  dt.month() === dayjs().month() &&
+                  dt.year() === dayjs().year();
 
                 const status = getStatus(marks, day);
                 const isOffice = status === "office";
@@ -250,23 +291,11 @@ export default function App() {
       </div>
 
       <div className="row stats" style={{ marginTop: 12 }}>
-        <div className="stat">
-          Dni robocze: <b>{workdays.length}</b>
-        </div>
-        <div className="stat">
-          Obecne dni: <b>{presentDays}</b>
-        </div>
-        <div className="stat">
-          Procent obecności: <b>{percent.toFixed(1)}%</b>
-        </div>
-        <div className="stat">
-          Min. liczba dni dla {requiredPercent}%: <b>{neededDays}</b>
-        </div>
-        {missing > 0 && (
-          <div className="stat">
-            Brakuje: <b>{missing}</b>
-          </div>
-        )}
+        <div className="stat">Dni robocze: <b>{workdays.length}</b></div>
+        <div className="stat">Obecne dni: <b>{presentDays}</b></div>
+        <div className="stat">Procent obecności: <b>{percent.toFixed(1)}%</b></div>
+        <div className="stat">Min. dni dla {requiredPercent}% (przy {employmentPercent}% etatu): <b>{neededDays}</b></div>
+        {missing > 0 && <div className="stat">Brakuje: <b>{missing}</b></div>}
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
@@ -275,7 +304,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* --- STOPKA Z LOGOWANIEM NA DOLE --- */}
       <footer className="footer-logout">
         <span>{user.email}</span>
         <button className="btn" onClick={() => signOut(auth)}>Wyloguj</button>

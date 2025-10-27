@@ -1,5 +1,6 @@
 :root { --bg:#0f1115; --panel:#161a22; --text:#eaeef7; --muted:#9aa4b2; --brand:#2dd4bf; --rose:#f5c2c7; --vio:#c4b5fd; }
-*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Arial}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Arial}
 .container{max-width:920px;margin:0 auto;padding:20px}
 .card{background:var(--panel);border-radius:12px;padding:16px}
 h1{margin:0 0 16px}
@@ -29,7 +30,7 @@ select{background:#1b2130;color:var(--text);border:1px solid #2b3346;padding:8px
 .bar{height:100%;background:var(--brand);width:0}
 .center{text-align:center}
 
-/* footer */
+/* --- STOPKA --- */
 .footer-logout{
   margin-top:32px;
   padding:14px 0;
@@ -40,4 +41,22 @@ select{background:#1b2130;color:var(--text);border:1px solid #2b3346;padding:8px
   gap:12px;
   font-size:14px;
   color:var(--muted);
+}
+
+/* --- KONTROLKI NAD KALENDARZEM (Wariant B) --- */
+.controls { display:flex; flex-direction:column; gap:8px; }
+.controls-top { display:flex; align-items:center; gap:6px; flex-wrap:nowrap; }
+.controls-bottom { display:flex; align-items:center; gap:8px; }
+
+.select-sm{ padding:6px 8px; border-radius:8px; height:34px; font-size:14px; }
+.select-sm.year{ width:70px; text-align:center; }
+.input-sm{ padding:6px 8px; height:34px; font-size:14px; width:60px; text-align:center; }
+.select-sm{ width:110px; } /* miesiąc */
+.label-inline{ font-size:13px; color:var(--muted); margin-left:4px; }
+
+/* ciaśniej na bardzo wąskich ekranach */
+@media (max-width: 380px) {
+  .select-sm{ width:104px; font-size:13px; }
+  .select-sm.year{ width:64px; }
+  .input-sm{ width:54px; font-size:13px; }
 }

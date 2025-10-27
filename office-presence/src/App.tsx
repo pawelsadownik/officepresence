@@ -24,7 +24,7 @@ type MonthDoc = {
   marks?: Mark[];
   days?: number[];                 // stary format (migracja -> office)
   requiredPercent: number;
-  employmentPercent?: number;      // NOWE: wymiar pracy w %
+  employmentPercent?: number;      // wymiar pracy w %
   updatedAt?: any;
 };
 
@@ -39,7 +39,7 @@ export default function App() {
 
   const [marks, setMarks] = useState<Mark[]>([]);
   const [requiredPercent, setRequiredPercent] = useState<number>(40);
-  const [employmentPercent, setEmploymentPercent] = useState<number>(100); // NOWE
+  const [employmentPercent, setEmploymentPercent] = useState<number>(100); // „Etat %”
 
   const yyyyMM = useMemo(() => dayjs(new Date(year, month, 1)).format("YYYY-MM"), [year, month]);
 
@@ -60,12 +60,12 @@ export default function App() {
           else if (Array.isArray(d.days)) setMarks(d.days.map((n) => ({ d: n, status: "office" as const })));
           else setMarks([]);
           setRequiredPercent(d.requiredPercent ?? 40);
-          setEmploymentPercent(d.employmentPercent ?? 100); // NOWE
+          setEmploymentPercent(d.employmentPercent ?? 100);
         } else {
           await setDoc(ref, {
             marks: [],
             requiredPercent: 40,
-            employmentPercent: 100,     // NOWE
+            employmentPercent: 100,
             updatedAt: serverTimestamp(),
           });
           setMarks([]);
@@ -134,7 +134,6 @@ export default function App() {
     await setDoc(ref, { requiredPercent: v, updatedAt: serverTimestamp() }, { merge: true });
   };
 
-  // NOWE: zapis wymiaru pracy
   const saveEmployment = async (val: number) => {
     const v = Math.max(0, Math.min(100, val));
     setEmploymentPercent(v);
@@ -157,30 +156,22 @@ export default function App() {
 
   const presentDays = marks.filter((m) => m.status === "office" && workdays.includes(m.d)).length;
 
-  // najpierw próg dla pełnego etatu, potem skala wymiaru
-  const baseNeeded = Math.round((requiredPercent / 100) * workdays.length);
-  const neededDays = Math.round(baseNeeded * (employmentPercent / 100));   // <= tu uwzględniamy wymiar pracy
+  // najpierw próg dla pełnego etatu, potem skala etatu
+  const baseNeeded = Math.ceil((requiredPercent / 100) * workdays.length);
+  const neededDays = Math.ceil(baseNeeded * (employmentPercent / 100));
   const percent = workdays.length ? (presentDays / workdays.length) * 100 : 0;
   const missing = Math.max(0, neededDays - presentDays);
 
   if (!user)
     return (
       <AuthScreen
-        onGoogle={async () => {
-          await signInWithPopup(auth, googleProvider);
-        }}
-        onEmailLogin={async (e, p) => {
-          await signInWithEmailAndPassword(auth, e, p);
-        }}
+        onGoogle={async () => { await signInWithPopup(auth, googleProvider); }}
+        onEmailLogin={async (e, p) => { await signInWithEmailAndPassword(auth, e, p); }}
         onEmailSignup={async (e, p) => {
           const r = await createUserWithEmailAndPassword(auth, e, p);
-          try {
-            await sendEmailVerification(r.user);
-          } catch {}
+          try { await sendEmailVerification(r.user); } catch {}
         }}
-        onForgot={async (e) => {
-          await sendPasswordResetEmail(auth, e);
-        }}
+        onForgot={async (e) => { await sendPasswordResetEmail(auth, e); }}
       />
     );
 
@@ -190,49 +181,44 @@ export default function App() {
         <h1>Obecność w biurze</h1>
       </div>
 
+      {/* --- KONTROLKI: 1 rząd (Miesiąc, Rok, Etat), 2 rząd (Minimalna obecność) --- */}
       <div className="card" style={{ marginBottom: 12 }}>
-        <div className="row" style={{ gap: 12 }}>
-          <select value={month} onChange={(e) => setMonth(parseInt(e.target.value))}>
-            {Array.from({ length: 12 }).map((_, i) => (
-              <option key={i} value={i}>
-                {dayjs().month(i).format("MMMM")}
-              </option>
-            ))}
-          </select>
-          <select value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
-            {Array.from({ length: 5 }).map((_, i) => {
-              const y = startYear - 2 + i;
-              return (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              );
-            })}
-          </select>
+        <div className="controls">
 
-          {/* Ustawienia po prawej */}
-          <div className="row" style={{ marginLeft: "auto", gap: 8 }}>
-            <label>Minimalna obecność %</label>
-            <input
-              className="input"
-              type="number"
-              min={0}
-              max={100}
-              value={requiredPercent}
-              onChange={(e) => savePercent(parseInt(e.target.value || "0"))}
-              style={{ width: 90 }}
-            />
+          <div className="controls-top">
+            <select className="select-sm" value={month} onChange={(e) => setMonth(parseInt(e.target.value))}>
+              {Array.from({ length: 12 }).map((_, i) => (
+                <option key={i} value={i}>{dayjs().month(i).format("MMMM")}</option>
+              ))}
+            </select>
 
-            {/* NOWE pole: Wymiar pracy % */}
-            <label>Wymiar pracy %</label>
+            <select className="select-sm year" value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
+              {Array.from({ length: 5 }).map((_, i) => {
+                const y = startYear - 2 + i;
+                return (<option key={y} value={y}>{y}</option>);
+              })}
+            </select>
+
+            <label className="label-inline">Etat %</label>
             <input
-              className="input"
+              className="input input-sm etat"
               type="number"
               min={0}
               max={100}
               value={employmentPercent}
               onChange={(e) => saveEmployment(parseInt(e.target.value || "0"))}
-              style={{ width: 90 }}
+            />
+          </div>
+
+          <div className="controls-bottom">
+            <label>Minimalna obecność %</label>
+            <input
+              className="input input-sm"
+              type="number"
+              min={0}
+              max={100}
+              value={requiredPercent}
+              onChange={(e) => savePercent(parseInt(e.target.value || "0"))}
             />
           </div>
         </div>
@@ -252,9 +238,7 @@ export default function App() {
           <>
             <div className="grid" style={{ marginBottom: 8 }}>
               {["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Nd"].map((l) => (
-                <div key={l} className="small center" style={{ opacity: 0.7 }}>
-                  {l}
-                </div>
+                <div key={l} className="small center" style={{ opacity: 0.7 }}>{l}</div>
               ))}
             </div>
             <div className="grid">
@@ -276,8 +260,7 @@ export default function App() {
                 const isExcused = status === "excused";
 
                 const cls = ["day", weekend && "weekend", holiday && "holiday", past && "past", isOffice && "selected", isExcused && "excused"]
-                  .filter(Boolean)
-                  .join(" ");
+                  .filter(Boolean).join(" ");
 
                 return (
                   <div key={day} className={cls} onClick={() => handleDayClick(day, dt)}>
@@ -341,16 +324,9 @@ function AuthScreen({
     }
   };
   const reset = async () => {
-    if (!email) {
-      setMsg("Podaj e-mail");
-      return;
-    }
-    try {
-      await onForgot(email);
-      setMsg("Wysłano link resetu hasła.");
-    } catch (e: any) {
-      setMsg(e.message || "Błąd");
-    }
+    if (!email) { setMsg("Podaj e-mail"); return; }
+    try { await onForgot(email); setMsg("Wysłano link resetu hasła."); }
+    catch (e: any) { setMsg(e.message || "Błąd"); }
   };
 
   return (
@@ -358,9 +334,7 @@ function AuthScreen({
       <div className="card">
         <h1 className="center">Sign up / Log in</h1>
         <div className="row" style={{ justifyContent: "center", margin: "12px 0" }}>
-          <button className="btn btn-brand" onClick={onGoogle}>
-            Zaloguj przez Google
-          </button>
+          <button className="btn btn-brand" onClick={onGoogle}>Zaloguj przez Google</button>
         </div>
         <div style={{ height: 1, background: "#2b3346", margin: "10px 0 14px" }} />
         <div className="row" style={{ flexDirection: "column", gap: 8 }}>

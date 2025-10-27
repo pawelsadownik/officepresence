@@ -157,8 +157,8 @@ export default function App() {
   const presentDays = marks.filter((m) => m.status === "office" && workdays.includes(m.d)).length;
 
   // najpierw próg dla pełnego etatu, potem skala etatu
-  const baseNeeded = Math.ceil((requiredPercent / 100) * workdays.length);
-  const neededDays = Math.ceil(baseNeeded * (employmentPercent / 100));
+  const baseNeeded = Math.round((requiredPercent / 100) * workdays.length);
+  const neededDays = Math.round(baseNeeded * (employmentPercent / 100));
   const percent = workdays.length ? (presentDays / workdays.length) * 100 : 0;
   const missing = Math.max(0, neededDays - presentDays);
 

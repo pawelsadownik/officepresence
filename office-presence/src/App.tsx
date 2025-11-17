@@ -80,7 +80,6 @@ export default function App() {
   }, [user, yyyyMM]);
 
   // calendar helpers
-  const today = dayjs();
   const firstDay = dayjs(new Date(year, month, 1));
   const daysInMonth = firstDay.daysInMonth();
 

@@ -110,9 +110,6 @@ export default function App() {
     if (!user) return;
     if (isWeekend(dt) || isHoliday(dt)) return;
 
-    const past = dt.isBefore(today.startOf("day")) && dt.month() === today.month() && dt.year() === today.year();
-    if (past) return;
-
     const current = getStatus(marks, day);
     const next = nextStatus3(current);
     const nextMarks = setStatus(marks, day, next);
@@ -279,12 +276,6 @@ export default function App() {
         <div className="stat">Procent obecności: <b>{percent.toFixed(1)}%</b></div>
         <div className="stat">Min. dni dla {requiredPercent}% (przy {employmentPercent}% etatu): <b>{neededDays}</b></div>
         {missing > 0 && <div className="stat">Brakuje: <b>{missing}</b></div>}
-      </div>
-
-      <div className="card" style={{ marginTop: 12 }}>
-        <div className="progress">
-          <div className="bar" style={{ width: `${Math.min(100, percent)}%` }} />
-        </div>
       </div>
 
       <footer className="footer-logout">

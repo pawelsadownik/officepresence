@@ -12,7 +12,7 @@ h1{margin:0 0 16px}
 .day{height:56px;border-radius:10px;display:flex;justify-content:center;align-items:center;border:1px solid #2b3346;background:#1a1f2c;cursor:pointer}
 .day.weekend{background:#1a1630;border-color:#2f2950;color:var(--vio)}
 .day.holiday{background:#2a1c22;border-color:#3b2830;color:var(--rose)}
-.day.past{opacity:.5;cursor:not-allowed}
+.day.past{opacity:.5;cursor:pointer}
 .day.selected{outline:2px solid var(--brand);background:#132225}
 .day.excused{outline:2px dashed #3b82f6;background:#1b2333;border-color:#2b3a55}
 .legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:14px}
